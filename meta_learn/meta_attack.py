@@ -9,8 +9,9 @@ class GNNAttack(nn.Module):
     """
     Implementation of GNN-Meta-attack
     """
+
     def __init__(self, model, n_nodes, train_steps=100, second_order_grad=False,
-     learning_rate=0.005, meta_learning_rate=0.005):
+                 learning_rate=0.005, meta_learning_rate=0.005):
         super(GNNAttack, self).__init__()
         self.model = model
         self.train_steps = train_steps
@@ -21,34 +22,47 @@ class GNNAttack(nn.Module):
         nn.init.xavier_normal_(self.adj_changes.data, gain=1e-3)
         # self.optimizer = optim.Adam([self.adj_changes], lr=meta_learning_rate, amsgrad=False)
         self.named_weights = None
-        
+
     def perturb_adj(self, adj, feature_matrix, train_ids, labels):
         if self.named_weights is None:
-            self.named_weights = self._get_named_param_dict(self.model.named_parameters())
+            self.named_weights = self._get_named_param_dict(
+                self.model.named_parameters())
         # train the model with current adjacency matrix
         for iter in range(self.train_steps):
             self.model.zero_grad()
-            preds = self.model.forward(adj, feature_matrix, param_dict=self.named_weights)
+            preds = self.model.forward(
+                adj, feature_matrix, param_dict=self.named_weights)
             loss = F.cross_entropy(preds[train_ids], labels[train_ids])
             print("epoch:{} train-loss = {}".format(iter, loss.data))
-            grads = torch.autograd.grad(loss, self.named_weights.values(), retain_graph=self.second_order_grad)
+            grads = torch.autograd.grad(
+                loss, self.named_weights.values(), create_graph=self.second_order_grad)
             # TODO calculate velocity using momentum
-            current_params = [w - self.learning_rate*grad for w, grad in zip(self.named_weights.values(), grads)]
-            self.named_weights = dict(zip(self.named_weights.keys(), current_params))
-        
+            current_params = [w - (self.learning_rate * grad) for w, grad in
+                              zip(self.named_weights.values(), grads)]
+            self.named_weights = dict(
+                zip(self.named_weights.keys(), current_params))
+
         # TODO calculate self-train loss
-        preds = self.model.forward(adj + self.adj_changes, feature_matrix, param_dict=self.named_weights)
+        # Sets the diagonal to zero
+        adj_changes_square = self.adj_changes - torch.diag(self.adj_changes, 0)
+        # Make it symmetric
+        adj_changes_square = torch.clamp(
+            adj_changes_square + torch.transpose(adj_changes_square, 1, 0), -1, 1)
+        preds = self.model.forward(
+            adj + adj_changes_square, feature_matrix, param_dict=self.named_weights)
         meta_loss = F.cross_entropy(preds[train_ids], labels[train_ids])
         # self.optimizer.zero_grad()
         # meta_loss.backward()
         self.model.zero_grad()
         meta_grad = torch.autograd.grad(meta_loss, self.adj_changes)
-        self.adj_changes.data = self.adj_changes.data - self.meta_learning_rate * meta_grad[0] 
+        self.adj_changes.data = self.adj_changes.data - \
+            self.meta_learning_rate * meta_grad[0]
         adj_meta_grad = meta_grad[0] * (-2*adj + 1)
         # Make sure the minimum value is 0
         adj_meta_grad -= torch.min(adj_meta_grad)
         adj_meta_grad_argmax = torch.argmax(adj_meta_grad)
-        perturb_indices = np.unravel_index(adj_meta_grad_argmax.data, adj_meta_grad.shape)
+        perturb_indices = np.unravel_index(
+            adj_meta_grad_argmax.data, adj_meta_grad.shape)
         # flips this edge in the adjacency matrix
         adj[perturb_indices] = torch.abs(adj[perturb_indices] - 1)
         adj[perturb_indices[1], perturb_indices[0]] = adj[perturb_indices]
@@ -59,6 +73,7 @@ class GNNAttack(nn.Module):
         """
         performs adversarial attack.
         """
+        self.model.train()
         for iter in range(n_pertubrations):
             print("perturbation: {}".format(iter+1))
             adj = self.perturb_adj(adj, feature_matrix, train_ids, labels)
