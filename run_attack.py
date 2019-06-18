@@ -63,7 +63,7 @@ if __name__ == "__main__":
         adj = torch.FloatTensor(_A_obs.todense())
         x = torch.FloatTensor(_X_obs.todense())
     target = torch.LongTensor(_z_obs.astype(np.int))
-    n_epoch = 50
+    n_epoch = 50 
 
     # train the model
     surrogate.train()
@@ -86,8 +86,10 @@ if __name__ == "__main__":
     acc_train = utils.accuracy(preds[split_train], target[split_train])
     acc_val = utils.accuracy(preds[split_val], target[split_val])
     print("epoch={}, train-loss={:.3f}, train-accuracy={:.2f}, val-accuracy={:.2f}".format(i, loss_train.item(),
+                       
                                                                                            acc_train.item(), acc_val.item()))
-    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=50, learning_rate=0.005,
+    surrogate.train()
+    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=50, learning_rate=0.01,
                                      meta_learning_rate=0.05, second_order_grad=True)
     attacker(adj, x, split_train, target)
 

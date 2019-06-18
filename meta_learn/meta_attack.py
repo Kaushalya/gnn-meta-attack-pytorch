@@ -11,13 +11,14 @@ class GNNAttack(nn.Module):
     """
 
     def __init__(self, model, n_nodes, train_steps=100, second_order_grad=False,
-                 learning_rate=0.005, meta_learning_rate=0.005):
+                 learning_rate=0.1, meta_learning_rate=0.005, momentum=0.9):
         super(GNNAttack, self).__init__()
         self.model = model
         self.train_steps = train_steps
         self.second_order_grad = second_order_grad
         self.learning_rate = learning_rate
         self.meta_learning_rate = meta_learning_rate
+        self.momentum = momentum
         self.adj_changes = nn.Parameter(torch.zeros(size=(n_nodes, n_nodes)))
         nn.init.xavier_normal_(self.adj_changes.data, gain=1e-3)
         # self.optimizer = optim.Adam([self.adj_changes], lr=meta_learning_rate, amsgrad=False)
@@ -27,6 +28,9 @@ class GNNAttack(nn.Module):
         if self.named_weights is None:
             self.named_weights = self._get_named_param_dict(
                 self.model.named_parameters())
+            self.velocities = [torch.zeros_like(
+                w) for w in self.named_weights.values()]
+        # velocities = [torch.zeros_like(w) for w in self.named_weights.values()]
         # train the model with current adjacency matrix
         for iter in range(self.train_steps):
             self.model.zero_grad()
@@ -36,9 +40,13 @@ class GNNAttack(nn.Module):
             print("epoch:{} train-loss = {}".format(iter, loss.data))
             grads = torch.autograd.grad(
                 loss, self.named_weights.values(), create_graph=self.second_order_grad)
-            # TODO calculate velocity using momentum
-            current_params = [w - (self.learning_rate * grad) for w, grad in
-                              zip(self.named_weights.values(), grads)]
+            velocities_new = [(self.momentum * v) +
+                          grad for grad, v in zip(grads, self.velocities)]
+            self.velocities = velocities_new
+            current_params = [w - (self.learning_rate * v) for w,
+                              v in zip(self.named_weights.values(), self.velocities)]
+            # current_params = [w - (self.learning_rate * grad) for w, grad in
+            #                   zip(self.named_weights.values(), grads)]
             self.named_weights = dict(
                 zip(self.named_weights.keys(), current_params))
 
