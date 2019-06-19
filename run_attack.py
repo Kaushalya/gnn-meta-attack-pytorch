@@ -26,7 +26,6 @@ if __name__ == "__main__":
     _N = _A_obs.shape[0]
     _K = _z_obs.max()+1
     _Z_obs = np.eye(_K)[_z_obs]
-    _An = utils.preprocess_adj(_A_obs)
     # sizes = [16, _K]
     degrees = _A_obs.sum(0).A1
 
@@ -50,7 +49,7 @@ if __name__ == "__main__":
     train_iters = 100
     dtype = np.float32
     gpu_id = -1
-    surrogate = MetaGCN(_X_obs.shape[1], _K, sparse=use_sparse)
+    surrogate = MetaGCN(_X_obs.shape[1], _K, sparse=use_sparse, normalize_adj=True)
     optimizer = optim.Adam(surrogate.parameters(), 
                        lr=0.005, 
                        weight_decay=5e-4)
@@ -63,7 +62,7 @@ if __name__ == "__main__":
         adj = torch.FloatTensor(_A_obs.todense())
         x = torch.FloatTensor(_X_obs.todense())
     target = torch.LongTensor(_z_obs.astype(np.int))
-    n_epoch = 50 
+    n_epoch = 20 
 
     # train the model
     surrogate.train()
@@ -75,9 +74,9 @@ if __name__ == "__main__":
         optimizer.step()
         acc_train = utils.accuracy(preds[split_train], target[split_train])
         acc_val = utils.accuracy(preds[split_val], target[split_val])
-        print("epoch={}, train-loss={:.3f}, train-accuracy={:.2f}, val-accuracy={:.2f}".format(i, loss_train.item(),
-         acc_train.item(), acc_val.item()))
-    
+        print("epoch={}, train-loss={:.3f}, train-accuracy={:.2f}, val-accuracy={:.2f}".
+              format(i, loss_train.item(), acc_train.item(), acc_val.item()))
+
     print("Model training complete.")
     #evaluation mode
     surrogate.eval()
@@ -89,7 +88,7 @@ if __name__ == "__main__":
                        
                                                                                            acc_train.item(), acc_val.item()))
     surrogate.train()
-    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=50, learning_rate=0.01,
-                                     meta_learning_rate=0.05, second_order_grad=True)
-    attacker(adj, x, split_train, target)
-
+    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=20,
+                                     learning_rate=0.1, meta_learning_rate=0.05,
+                                     second_order_grad=True, debug=False)
+    attacker(adj, x, target, split_train, split_val)

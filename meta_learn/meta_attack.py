@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
-
+from meta_learn import utils
 
 class GNNAttack(nn.Module):
     """
@@ -11,7 +11,8 @@ class GNNAttack(nn.Module):
     """
 
     def __init__(self, model, n_nodes, train_steps=100, second_order_grad=False,
-                 learning_rate=0.1, meta_learning_rate=0.005, momentum=0.9):
+                 learning_rate=0.1, meta_learning_rate=0.005, 
+                 momentum=0.9, debug=False):
         super(GNNAttack, self).__init__()
         self.model = model
         self.train_steps = train_steps
@@ -19,12 +20,13 @@ class GNNAttack(nn.Module):
         self.learning_rate = learning_rate
         self.meta_learning_rate = meta_learning_rate
         self.momentum = momentum
+        self.debug = debug
         self.adj_changes = nn.Parameter(torch.zeros(size=(n_nodes, n_nodes)))
-        nn.init.xavier_normal_(self.adj_changes.data, gain=1e-3)
+        nn.init.xavier_normal_(self.adj_changes.data, gain=0.1)
         # self.optimizer = optim.Adam([self.adj_changes], lr=meta_learning_rate, amsgrad=False)
         self.named_weights = None
 
-    def perturb_adj(self, adj, feature_matrix, train_ids, labels):
+    def perturb_adj(self, adj, feature_matrix, labels, train_ids, val_ids=None):
         if self.named_weights is None:
             self.named_weights = self._get_named_param_dict(
                 self.model.named_parameters())
@@ -37,7 +39,8 @@ class GNNAttack(nn.Module):
             preds = self.model.forward(
                 adj, feature_matrix, param_dict=self.named_weights)
             loss = F.cross_entropy(preds[train_ids], labels[train_ids])
-            print("epoch:{} train-loss = {}".format(iter, loss.data))
+            if self.debug:
+                print("epoch:{} train-loss = {}".format(iter, loss.data))
             grads = torch.autograd.grad(
                 loss, self.named_weights.values(), create_graph=self.second_order_grad)
             velocities_new = [(self.momentum * v) +
@@ -56,15 +59,12 @@ class GNNAttack(nn.Module):
         # Make it symmetric
         adj_changes_square = torch.clamp(
             adj_changes_square + torch.transpose(adj_changes_square, 1, 0), -1, 1)
+        modified_adj = torch.clamp(adj + adj_changes_square, 0, 1)
         preds = self.model.forward(
-            adj + adj_changes_square, feature_matrix, param_dict=self.named_weights)
+            modified_adj, feature_matrix, param_dict=self.named_weights)
         meta_loss = F.cross_entropy(preds[train_ids], labels[train_ids])
-        # self.optimizer.zero_grad()
-        # meta_loss.backward()
         self.model.zero_grad()
         meta_grad = torch.autograd.grad(meta_loss, self.adj_changes)
-        self.adj_changes.data = self.adj_changes.data - \
-            self.meta_learning_rate * meta_grad[0]
         adj_meta_grad = meta_grad[0] * (-2*adj + 1)
         # Make sure the minimum value is 0
         adj_meta_grad -= torch.min(adj_meta_grad)
@@ -77,14 +77,22 @@ class GNNAttack(nn.Module):
         # TODO filter singleton nodes
         return adj
 
-    def forward(self, adj, feature_matrix, train_ids, labels, n_pertubrations=100):
+    def forward(self, adj, feature_matrix, labels, train_ids,
+                val_ids, n_perturbations=100):
         """
         performs adversarial attack.
         """
-        self.model.train()
-        for iter in range(n_pertubrations):
-            print("perturbation: {}".format(iter+1))
-            adj = self.perturb_adj(adj, feature_matrix, train_ids, labels)
+        for iter in range(n_perturbations):
+            self.model.train()
+            print("perturbation: {} is running".format(iter+1))
+            adj = self.perturb_adj(adj, feature_matrix,
+                                   labels, train_ids, val_ids)
+            self.model.eval()
+            preds = self.model(adj, feature_matrix)
+            acc_train = utils.accuracy(preds[train_ids], labels[train_ids])
+            acc_val = utils.accuracy(preds[val_ids], labels[val_ids])
+            print("train-accuracy={:.2f}, val-accuracy={:.2f}".
+                  format(acc_train.item(), acc_val.item()))
         return adj
 
     def _get_named_param_dict(self, params):
