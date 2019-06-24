@@ -5,6 +5,10 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
+def get_argparser():
+    # TODO implement argument parser
+    pass
+
 if __name__ == "__main__":
     _A_obs, _X_obs, _z_obs = utils.load_npz('data/citeseer.npz')
     _A_obs = _A_obs + _A_obs.T
@@ -50,9 +54,6 @@ if __name__ == "__main__":
     dtype = np.float32
     gpu_id = -1
     surrogate = MetaGCN(_X_obs.shape[1], _K, sparse=use_sparse, normalize_adj=True)
-    optimizer = optim.Adam(surrogate.parameters(), 
-                       lr=0.005, 
-                       weight_decay=5e-4)
     
     if use_sparse:
         # Pytorch supports only sparse matrices of type COO.
@@ -64,6 +65,16 @@ if __name__ == "__main__":
     target = torch.LongTensor(_z_obs.astype(np.int))
     n_epoch = 20 
 
+    if torch.cuda.is_available():
+        print("Running on GPU")
+        surrogate.cuda()
+        adj.cuda()
+        x.cuda()
+        target.cuda()
+
+    optimizer = optim.Adam(surrogate.parameters(),
+                           lr=0.005,
+                           weight_decay=5e-4)
     # train the model
     surrogate.train()
     for i in range(n_epoch):
@@ -84,11 +95,15 @@ if __name__ == "__main__":
     loss_train = F.cross_entropy(preds[split_train], target[split_train])
     acc_train = utils.accuracy(preds[split_train], target[split_train])
     acc_val = utils.accuracy(preds[split_val], target[split_val])
-    print("epoch={}, train-loss={:.3f}, train-accuracy={:.2f}, val-accuracy={:.2f}".format(i, loss_train.item(),
-                       
-                                                                                           acc_train.item(), acc_val.item()))
+    print("epoch={}, train-loss={:.3f}, train-accuracy={:.2f}, \
+     val-accuracy={:.2f}".format(i, loss_train.item(),
+                                 acc_train.item(), acc_val.item()))
     surrogate.train()
     attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=20,
                                      learning_rate=0.1, meta_learning_rate=0.05,
-                                     second_order_grad=True, debug=False)
-    attacker(adj, x, target, split_train, split_val)
+                                     second_order_grad=True, debug=True)
+    
+    if torch.cuda.is_available():
+        attacker.cuda()
+
+    modified_adj = attacker(adj, x, target, split_train, split_val)

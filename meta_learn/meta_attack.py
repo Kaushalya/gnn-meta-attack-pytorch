@@ -48,14 +48,12 @@ class GNNAttack(nn.Module):
             self.velocities = velocities_new
             current_params = [w - (self.learning_rate * v) for w,
                               v in zip(self.named_weights.values(), self.velocities)]
-            # current_params = [w - (self.learning_rate * grad) for w, grad in
-            #                   zip(self.named_weights.values(), grads)]
             self.named_weights = dict(
                 zip(self.named_weights.keys(), current_params))
 
         # TODO calculate self-train loss
         # Sets the diagonal to zero
-        adj_changes_square = self.adj_changes - torch.diag(self.adj_changes, 0)
+        adj_changes_square = self.adj_changes - torch.diag(torch.diag(self.adj_changes, 0))
         # Make it symmetric
         adj_changes_square = torch.clamp(
             adj_changes_square + torch.transpose(adj_changes_square, 1, 0), -1, 1)
@@ -68,13 +66,16 @@ class GNNAttack(nn.Module):
         adj_meta_grad = meta_grad[0] * (-2*adj + 1)
         # Make sure the minimum value is 0
         adj_meta_grad -= torch.min(adj_meta_grad)
-        adj_meta_grad_argmax = torch.argmax(adj_meta_grad)
+        # Filter self-loops
+        adj_meta_grad -= torch.diag(torch.diag(adj_meta_grad, 0))
+        # Filter potential singleton nodes
+        singleton_mask = self.filter_singletons(adj)
+        adj_meta_grad_argmax = torch.argmax(adj_meta_grad * singleton_mask)
         perturb_indices = np.unravel_index(
             adj_meta_grad_argmax.data, adj_meta_grad.shape)
         # flips this edge in the adjacency matrix
         adj[perturb_indices] = torch.abs(adj[perturb_indices] - 1)
         adj[perturb_indices[1], perturb_indices[0]] = adj[perturb_indices]
-        # TODO filter singleton nodes
         return adj
 
     def forward(self, adj, feature_matrix, labels, train_ids,
@@ -94,6 +95,21 @@ class GNNAttack(nn.Module):
             print("train-accuracy={:.2f}, val-accuracy={:.2f}".
                   format(acc_train.item(), acc_val.item()))
         return adj
+
+    def filter_singletons(self, adj):
+        """
+        Computes a mask for entries potentially leading to
+        singleton nodes, i.e. one of the two nodes corresponding
+        to the entry have degree 1 and there is an edge between
+        the two nodes. Removing such an edge results in an isolated
+        node which is not connected to the rest of the graph.
+        """
+        degree = torch.sum(adj, dim=0)
+        deg_one = degree == 1
+        row_mask = deg_one.type_as(adj).reshape((1, -1)) * adj
+        column_mask = adj * deg_one.type_as(adj).reshape((-1, 1))
+        mask = row_mask + column_mask
+        return mask
 
     def _get_named_param_dict(self, params):
         param_dict = dict()
