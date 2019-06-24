@@ -10,9 +10,9 @@ class GNNAttack(nn.Module):
     Implementation of GNN-Meta-attack
     """
 
-    def __init__(self, model, n_nodes, train_steps=100, second_order_grad=False,
+    def __init__(self, model, n_nodes, device=None, train_steps=100, second_order_grad=False,
                  learning_rate=0.1, meta_learning_rate=0.005, 
-                 momentum=0.9, debug=False):
+                 momentum=0.9, debug=False, normalize_adj=False):
         super(GNNAttack, self).__init__()
         self.model = model
         self.train_steps = train_steps
@@ -21,6 +21,8 @@ class GNNAttack(nn.Module):
         self.meta_learning_rate = meta_learning_rate
         self.momentum = momentum
         self.debug = debug
+        self.device = device
+        self.normalize_adj = normalize_adj
         self.adj_changes = nn.Parameter(torch.zeros(size=(n_nodes, n_nodes)))
         nn.init.xavier_normal_(self.adj_changes.data, gain=0.1)
         # self.optimizer = optim.Adam([self.adj_changes], lr=meta_learning_rate, amsgrad=False)
@@ -35,12 +37,12 @@ class GNNAttack(nn.Module):
         # velocities = [torch.zeros_like(w) for w in self.named_weights.values()]
         # train the model with current adjacency matrix
         for iter in range(self.train_steps):
-            self.model.zero_grad()
             preds = self.model.forward(
                 adj, feature_matrix, param_dict=self.named_weights)
             loss = F.cross_entropy(preds[train_ids], labels[train_ids])
             if self.debug:
                 print("epoch:{} train-loss = {}".format(iter, loss.data))
+            self.model.zero_grad()
             grads = torch.autograd.grad(
                 loss, self.named_weights.values(), create_graph=self.second_order_grad)
             velocities_new = [(self.momentum * v) +
@@ -48,6 +50,7 @@ class GNNAttack(nn.Module):
             self.velocities = velocities_new
             current_params = [w - (self.learning_rate * v) for w,
                               v in zip(self.named_weights.values(), self.velocities)]
+            # TODO set values to the same dict
             self.named_weights = dict(
                 zip(self.named_weights.keys(), current_params))
 
@@ -72,7 +75,7 @@ class GNNAttack(nn.Module):
         singleton_mask = self.filter_singletons(adj)
         adj_meta_grad_argmax = torch.argmax(adj_meta_grad * singleton_mask)
         perturb_indices = np.unravel_index(
-            adj_meta_grad_argmax.data, adj_meta_grad.shape)
+            adj_meta_grad_argmax.cpu().data, adj_meta_grad.shape)
         # flips this edge in the adjacency matrix
         adj[perturb_indices] = torch.abs(adj[perturb_indices] - 1)
         adj[perturb_indices[1], perturb_indices[0]] = adj[perturb_indices]
@@ -86,6 +89,7 @@ class GNNAttack(nn.Module):
         for iter in range(n_perturbations):
             self.model.train()
             print("perturbation: {} is running".format(iter+1))
+            adj = self.preprocess_adj(adj)
             adj = self.perturb_adj(adj, feature_matrix,
                                    labels, train_ids, val_ids)
             self.model.eval()
@@ -110,6 +114,17 @@ class GNNAttack(nn.Module):
         column_mask = adj * deg_one.type_as(adj).reshape((-1, 1))
         mask = row_mask + column_mask
         return mask
+
+    def preprocess_adj(self, adj):
+        # TODO call this only once before forward
+        # if self.eye is None:
+        #     self.eye = torch.diag(torch.ones(adj.shape[0], device=self.device))
+        adj_ = adj + torch.diag(torch.ones(adj.shape[0], device=self.device))
+        rowsum = torch.sum(adj_, dim=0)
+        degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
+        adj_norm = torch.mm(torch.mm(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
+                                degree_mat_inv_sqrt)
+        return adj_norm
 
     def _get_named_param_dict(self, params):
         param_dict = dict()

@@ -7,17 +7,19 @@ class MetaGCN(nn.Module):
     Implementation of Graph Convolutional Networks (Kipf and Welling, ICLR 2017)
     """
 
-    def __init__(self, n_feat, n_classes, dropout=False, ch_list=None, multilabel=False,
-                 sparse=False, normalize_adj=False):
+    def __init__(self, n_feat, n_classes, device, dropout=False, ch_list=None, multilabel=False,
+                 sparse=False):
         super(MetaGCN, self).__init__()
         ch_list = ch_list or [n_feat, 256, 128]
+        self.device = device
         self.multilabel = multilabel
         self.dropout = dropout
         self.gconvs = [GraphLinearLayer(
             ch_list[i], ch_list[i+1], sparse=sparse) for i in range(len(ch_list)-1)]
         self.lin = GraphLinearLayer(ch_list[-1], n_classes, sparse=sparse)
         self.layer_names = ['lin']
-        self.normalize_adj = normalize_adj
+        # self.normalize_adj = normalize_adj
+        self.eye = None
         for i, gconv in enumerate(self.gconvs):
             layer_name = 'gconv_{}'.format(i)
             self.add_module(layer_name, gconv)
@@ -31,8 +33,6 @@ class MetaGCN(nn.Module):
         :param x: feature matrix
         :param param_dict: a dictionary of weights to be used as model parameters
         """
-        if self.normalize_adj:
-            adj = self.preprocess_adj(adj)
         for i, gconv in enumerate(self.gconvs):
             params = None
             if param_dict is not None:
@@ -43,13 +43,6 @@ class MetaGCN(nn.Module):
             h = torch.sigmoid(h)
         return h
 
-    def preprocess_adj(self, adj):
-        adj_ = adj + torch.eye(adj.shape[0])
-        rowsum = torch.sum(adj_, dim=0)
-        degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
-        adj_norm = torch.matmul(torch.matmul(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
-                                degree_mat_inv_sqrt)
-        return adj_norm
 
 class GraphLinearLayer(nn.Module):
     def __init__(self, in_features, out_features, sparse=False, gpu=False):

@@ -5,12 +5,25 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
+from argparse import ArgumentParser
+from distutils.util import strtobool
+
 def get_argparser():
     # TODO implement argument parser
-    pass
+    parser = ArgumentParser('GNN Meta Attack')
+    parser.add_argument('--data_file', type=str, default='data/citeseer.npz')
+    parser.add_argument('--use_sparse', type=strtobool, default='no',
+                        help='Whether to use sparse representations')
+    parser.add_argument('--normalize_adj', type=strtobool, default='yes',
+                        help='Whether to normalize the adjacency matrix'+
+                        ' when performing graph convolutions')
+    parser.add_argument('--perturb_ratio', type=float, default=0.05)
+    args = parser.parse_args()
+    return args
 
 if __name__ == "__main__":
-    _A_obs, _X_obs, _z_obs = utils.load_npz('data/citeseer.npz')
+    args = get_argparser()
+    _A_obs, _X_obs, _z_obs = utils.load_npz(args.data_file)
     _A_obs = _A_obs + _A_obs.T
     _A_obs[_A_obs > 1] = 1
     lcc = utils.largest_connected_components(_A_obs)
@@ -30,7 +43,6 @@ if __name__ == "__main__":
     _N = _A_obs.shape[0]
     _K = _z_obs.max()+1
     _Z_obs = np.eye(_K)[_z_obs]
-    # sizes = [16, _K]
     degrees = _A_obs.sum(0).A1
 
     seed = 15
@@ -47,15 +59,18 @@ if __name__ == "__main__":
     split_unlabeled = np.union1d(split_val, split_unlabeled)
     
     hidden_sizes = [16]
-    use_sparse = False
-    share_perturbations = 0.05
-    perturbations = int(share_perturbations * (_A_obs.sum()//2))
+    perturbations = int(args.perturb_ratio * (_A_obs.sum()//2))
     train_iters = 100
     dtype = np.float32
-    gpu_id = -1
-    surrogate = MetaGCN(_X_obs.shape[1], _K, sparse=use_sparse, normalize_adj=True)
+    device = torch.device('cpu')
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print("Running on GPU : {}".format(device))
+
+    surrogate = MetaGCN(_X_obs.shape[1], _K, device, sparse=args.use_sparse, normalize_adj=True)
     
-    if use_sparse:
+    if args.use_sparse:
         # Pytorch supports only sparse matrices of type COO.
         adj = utils.sparse_to_torch(_A_obs.tocoo())
         x = utils.sparse_to_torch(_X_obs.tocoo())
@@ -66,11 +81,10 @@ if __name__ == "__main__":
     n_epoch = 20 
 
     if torch.cuda.is_available():
-        print("Running on GPU")
-        surrogate.cuda()
-        adj.cuda()
-        x.cuda()
-        target.cuda()
+        surrogate = surrogate.to(device)
+        adj = adj.to(device)
+        x = x.to(device)
+        target = target.to(device)
 
     optimizer = optim.Adam(surrogate.parameters(),
                            lr=0.005,
@@ -99,8 +113,9 @@ if __name__ == "__main__":
      val-accuracy={:.2f}".format(i, loss_train.item(),
                                  acc_train.item(), acc_val.item()))
     surrogate.train()
-    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], train_steps=20,
-                                     learning_rate=0.1, meta_learning_rate=0.05,
+    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], device=device,
+                                     train_steps=20, learning_rate=0.1, 
+                                     meta_learning_rate=0.05,
                                      second_order_grad=True, debug=True)
     
     if torch.cuda.is_available():
