@@ -54,7 +54,7 @@ def load_npz(file_name):
     return adj_matrix, attr_matrix, labels
 
 
-def preprocess_adj(adj):
+def preprocess_adj(adj, device):
     """
     Perform the processing of the adjacency matrix proposed by Kipf et al. 2017.
 
@@ -68,11 +68,12 @@ def preprocess_adj(adj):
     The matrix (D+1)^(-0.5) (adj + I) (D+1)^(-0.5)
 
     """
-    adj_ = adj + sp.sparse.eye(adj.shape[0])
-    rowsum = adj_.sum(1).A1
-    degree_mat_inv_sqrt = sp.sparse.diags(np.power(rowsum, -0.5))
-    adj_normalized = adj_.dot(degree_mat_inv_sqrt).T.dot(degree_mat_inv_sqrt).tocsr()
-    return adj_normalized
+    adj_ = adj + torch.diag(torch.ones(adj.shape[0], device=device))
+    rowsum = torch.sum(adj_, dim=0)
+    degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
+    adj_norm = torch.mm(torch.mm(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
+                        degree_mat_inv_sqrt)
+    return adj_norm
 
 
 def largest_connected_components(adj, n_components=1):

@@ -36,23 +36,31 @@ class GNNAttack(nn.Module):
                 w) for w in self.named_weights.values()]
         # velocities = [torch.zeros_like(w) for w in self.named_weights.values()]
         # train the model with current adjacency matrix
+        grads = None
+        adj_norm = utils.preprocess_adj(adj, self.device)
+
+        # TODO move to a sperate function
+        # reset gradient history
+        for i, key in enumerate(self.named_weights.keys()):
+            self.named_weights[key] = self.named_weights[key].detach()
+            self.named_weights[key].requires_grad = True
+            self.velocities[i] = self.velocities[i].detach()
+
         for iter in range(self.train_steps):
+            self.model.zero_grad(param_dict=self.named_weights)
             preds = self.model.forward(
-                adj, feature_matrix, param_dict=self.named_weights)
+                adj_norm, feature_matrix, param_dict=self.named_weights)
             loss = F.cross_entropy(preds[train_ids], labels[train_ids])
             if self.debug:
                 print("epoch:{} train-loss = {}".format(iter, loss.data))
-            self.model.zero_grad()
+            # self.model.zero_grad(param_dict=self.named_weights)
             grads = torch.autograd.grad(
                 loss, self.named_weights.values(), create_graph=self.second_order_grad)
-            velocities_new = [(self.momentum * v) +
+            self.velocities = [(self.momentum * v) +
                           grad for grad, v in zip(grads, self.velocities)]
-            self.velocities = velocities_new
             current_params = [w - (self.learning_rate * v) for w,
                               v in zip(self.named_weights.values(), self.velocities)]
-            # TODO set values to the same dict
-            self.named_weights = dict(
-                zip(self.named_weights.keys(), current_params))
+            self.set_weights(current_params)
 
         # TODO calculate self-train loss
         # Sets the diagonal to zero
@@ -79,6 +87,10 @@ class GNNAttack(nn.Module):
         # flips this edge in the adjacency matrix
         adj[perturb_indices] = torch.abs(adj[perturb_indices] - 1)
         adj[perturb_indices[1], perturb_indices[0]] = adj[perturb_indices]
+
+        # reset gradient history
+        preds = preds.detach()
+        meta_loss = meta_loss.detach()
         return adj
 
     def forward(self, adj, feature_matrix, labels, train_ids,
@@ -89,15 +101,16 @@ class GNNAttack(nn.Module):
         for iter in range(n_perturbations):
             self.model.train()
             print("perturbation: {} is running".format(iter+1))
-            adj = self.preprocess_adj(adj)
+            # self.model.zero_grad(self.named_weights)
             adj = self.perturb_adj(adj, feature_matrix,
                                    labels, train_ids, val_ids)
             self.model.eval()
-            preds = self.model(adj, feature_matrix)
-            acc_train = utils.accuracy(preds[train_ids], labels[train_ids])
-            acc_val = utils.accuracy(preds[val_ids], labels[val_ids])
-            print("train-accuracy={:.2f}, val-accuracy={:.2f}".
-                  format(acc_train.item(), acc_val.item()))
+            with torch.no_grad():
+                preds = self.model(adj, feature_matrix)
+                acc_train = utils.accuracy(preds[train_ids], labels[train_ids])
+                acc_val = utils.accuracy(preds[val_ids], labels[val_ids])
+                print("train-accuracy={:.2f}, val-accuracy={:.2f}".
+                    format(acc_train.item(), acc_val.item()))
         return adj
 
     def filter_singletons(self, adj):
@@ -115,16 +128,17 @@ class GNNAttack(nn.Module):
         mask = row_mask + column_mask
         return mask
 
-    def preprocess_adj(self, adj):
-        # TODO call this only once before forward
-        # if self.eye is None:
-        #     self.eye = torch.diag(torch.ones(adj.shape[0], device=self.device))
-        adj_ = adj + torch.diag(torch.ones(adj.shape[0], device=self.device))
-        rowsum = torch.sum(adj_, dim=0)
-        degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
-        adj_norm = torch.mm(torch.mm(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
-                                degree_mat_inv_sqrt)
-        return adj_norm
+    def set_weights(self, params):
+        for key, param in zip(self.named_weights.keys(), params):
+            self.named_weights[key] = param
+
+    # def preprocess_adj(self, adj):
+    #     adj_ = adj + torch.diag(torch.ones(adj.shape[0], device=self.device))
+    #     rowsum = torch.sum(adj_, dim=0)
+    #     degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
+    #     adj_norm = torch.mm(torch.mm(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
+    #                             degree_mat_inv_sqrt)
+    #     return adj_norm
 
     def _get_named_param_dict(self, params):
         param_dict = dict()

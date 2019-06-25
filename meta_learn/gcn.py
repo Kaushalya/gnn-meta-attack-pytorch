@@ -43,6 +43,14 @@ class MetaGCN(nn.Module):
             h = torch.sigmoid(h)
         return h
 
+    def zero_grad(self, param_dict=None):
+        if param_dict is None:
+            super().zero_grad()
+        else:
+            for name, param in param_dict.items():
+                if param.requires_grad and param.grad is not None:
+                    param.grad.zero_()
+                    param_dict[name].grad = None
 
 class GraphLinearLayer(nn.Module):
     def __init__(self, in_features, out_features, sparse=False, gpu=False):

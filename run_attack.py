@@ -67,9 +67,9 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device('cuda')
         print("Running on GPU : {}".format(device))
-
-    surrogate = MetaGCN(_X_obs.shape[1], _K, device, sparse=args.use_sparse, normalize_adj=True)
     
+    surrogate = MetaGCN(_X_obs.shape[1], _K, device, sparse=args.use_sparse)
+
     if args.use_sparse:
         # Pytorch supports only sparse matrices of type COO.
         adj = utils.sparse_to_torch(_A_obs.tocoo())
@@ -86,6 +86,7 @@ if __name__ == "__main__":
         x = x.to(device)
         target = target.to(device)
 
+    adj_normalized = utils.preprocess_adj(adj, device=device)
     optimizer = optim.Adam(surrogate.parameters(),
                            lr=0.005,
                            weight_decay=5e-4)
@@ -93,7 +94,7 @@ if __name__ == "__main__":
     surrogate.train()
     for i in range(n_epoch):
         optimizer.zero_grad()
-        preds = surrogate(adj, x)
+        preds = surrogate(adj_normalized, x)
         loss_train = F.cross_entropy(preds[split_train], target[split_train])
         loss_train.backward()
         optimizer.step()
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     print("Model training complete.")
     #evaluation mode
     surrogate.eval()
-    preds = surrogate(adj, x)
+    preds = surrogate(adj_normalized, x)
     loss_train = F.cross_entropy(preds[split_train], target[split_train])
     acc_train = utils.accuracy(preds[split_train], target[split_train])
     acc_val = utils.accuracy(preds[split_val], target[split_val])
