@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class MetaGCN(nn.Module):
     """
     Implementation of Graph Convolutional Networks (Kipf and Welling, ICLR 2017)
@@ -38,7 +39,8 @@ class MetaGCN(nn.Module):
             if param_dict is not None:
                 params = param_dict['gconv_{}'.format(i)]
             x = F.relu(gconv(adj, x, params=params))
-        h = self.lin(adj, x, params=param_dict['lin'] if param_dict is not None else None)
+        h = self.lin(
+            adj, x, params=param_dict['lin'] if param_dict is not None else None)
         if self.multilabel:
             h = torch.sigmoid(h)
         return h
@@ -51,6 +53,7 @@ class MetaGCN(nn.Module):
                 if param.requires_grad and param.grad is not None:
                     param.grad.zero_()
                     param_dict[name].grad = None
+
 
 class GraphLinearLayer(nn.Module):
     def __init__(self, in_features, out_features, sparse=False, gpu=False):
@@ -66,9 +69,11 @@ class GraphLinearLayer(nn.Module):
         # TODO use dropout?
         # self.dropout = nn.Dropout(dropout)
         if sparse:
-            self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
+            self.W = nn.Parameter(torch.zeros(
+                size=(in_features, out_features)))
         else:
-            self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
+            self.W = nn.Parameter(torch.zeros(
+                size=(in_features, out_features)))
         nn.init.xavier_normal_(self.W.data, gain=1.414)
 
     def forward(self, adj, x, params=None):

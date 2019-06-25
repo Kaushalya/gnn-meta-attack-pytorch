@@ -5,27 +5,26 @@ import torch.optim as optim
 import numpy as np
 from meta_learn import utils
 
+
 class GNNAttack(nn.Module):
     """
     Implementation of GNN-Meta-attack
     """
 
-    def __init__(self, model, n_nodes, device=None, train_steps=100, second_order_grad=False,
-                 learning_rate=0.1, meta_learning_rate=0.005, 
-                 momentum=0.9, debug=False, normalize_adj=False):
+    def __init__(self, model, n_nodes, device=None, train_steps=100,
+                 second_order_grad=False, learning_rate=0.1, momentum=0.9,
+                 debug=False, normalize_adj=False):
         super(GNNAttack, self).__init__()
         self.model = model
         self.train_steps = train_steps
         self.second_order_grad = second_order_grad
         self.learning_rate = learning_rate
-        self.meta_learning_rate = meta_learning_rate
         self.momentum = momentum
         self.debug = debug
         self.device = device
         self.normalize_adj = normalize_adj
         self.adj_changes = nn.Parameter(torch.zeros(size=(n_nodes, n_nodes)))
         nn.init.xavier_normal_(self.adj_changes.data, gain=0.1)
-        # self.optimizer = optim.Adam([self.adj_changes], lr=meta_learning_rate, amsgrad=False)
         self.named_weights = None
 
     def perturb_adj(self, adj, feature_matrix, labels, train_ids, val_ids=None):
@@ -39,7 +38,6 @@ class GNNAttack(nn.Module):
         grads = None
         adj_norm = utils.preprocess_adj(adj, self.device)
 
-        # TODO move to a sperate function
         # reset gradient history
         for i, key in enumerate(self.named_weights.keys()):
             self.named_weights[key] = self.named_weights[key].detach()
@@ -57,14 +55,15 @@ class GNNAttack(nn.Module):
             grads = torch.autograd.grad(
                 loss, self.named_weights.values(), create_graph=self.second_order_grad)
             self.velocities = [(self.momentum * v) +
-                          grad for grad, v in zip(grads, self.velocities)]
+                               grad for grad, v in zip(grads, self.velocities)]
             current_params = [w - (self.learning_rate * v) for w,
                               v in zip(self.named_weights.values(), self.velocities)]
             self.set_weights(current_params)
 
         # TODO calculate self-train loss
         # Sets the diagonal to zero
-        adj_changes_square = self.adj_changes - torch.diag(torch.diag(self.adj_changes, 0))
+        adj_changes_square = self.adj_changes - \
+            torch.diag(torch.diag(self.adj_changes, 0))
         # Make it symmetric
         adj_changes_square = torch.clamp(
             adj_changes_square + torch.transpose(adj_changes_square, 1, 0), -1, 1)
@@ -110,7 +109,7 @@ class GNNAttack(nn.Module):
                 acc_train = utils.accuracy(preds[train_ids], labels[train_ids])
                 acc_val = utils.accuracy(preds[val_ids], labels[val_ids])
                 print("train-accuracy={:.2f}, val-accuracy={:.2f}".
-                    format(acc_train.item(), acc_val.item()))
+                      format(acc_train.item(), acc_val.item()))
         return adj
 
     def filter_singletons(self, adj):
@@ -131,14 +130,6 @@ class GNNAttack(nn.Module):
     def set_weights(self, params):
         for key, param in zip(self.named_weights.keys(), params):
             self.named_weights[key] = param
-
-    # def preprocess_adj(self, adj):
-    #     adj_ = adj + torch.diag(torch.ones(adj.shape[0], device=self.device))
-    #     rowsum = torch.sum(adj_, dim=0)
-    #     degree_mat_inv_sqrt = torch.diag(torch.pow(rowsum, -0.5))
-    #     adj_norm = torch.mm(torch.mm(adj_, degree_mat_inv_sqrt.transpose(1, 0)),
-    #                             degree_mat_inv_sqrt)
-    #     return adj_norm
 
     def _get_named_param_dict(self, params):
         param_dict = dict()
