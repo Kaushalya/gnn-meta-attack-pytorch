@@ -1,4 +1,5 @@
 python run_attack.py \
 --debug no \
 --perturb_ratio 0.05 \
---inner_loop_iter 20
+--inner_loop_iter 20 \
+--approx_meta_grad no
