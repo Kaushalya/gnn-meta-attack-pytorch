@@ -1,7 +1,7 @@
 # GNN-meta-attack-pytorch
 **Pytorch** implementation of the paper [Adversarial Attacks on Graph Neural Networks via Meta Learning](https://openreview.net/forum?id=Bylnx209YX&noteId=r1xNHe2tAQ).
 
-Original implementation by Daniel Zügner is available here. [https://github.com/danielzuegner/gnn-meta-attack](https://github.com/danielzuegner/gnn-meta-attack)
+Original implementation in Tensorflow by Daniel Zügner is available here. [https://github.com/danielzuegner/gnn-meta-attack](https://github.com/danielzuegner/gnn-meta-attack)
 
 ## Dependencies
 1. Python 3.6+
