@@ -118,10 +118,14 @@ if __name__ == "__main__":
      val-accuracy={:.2f}".format(loss_train.item(),
                                  acc_train.item(), acc_val.item()))
     surrogate.train()
-    attacker = meta_attack.GNNAttack(surrogate, adj.shape[0], device=device,
-                                     train_steps=args.inner_loop_iter, learning_rate=0.1,
-                                     second_order_grad=not args.approx_meta_grad,
-                                     debug=args.debug)
+    if args.approx_meta_grad:
+        attacker = meta_attack.GNNApproxMetaAttack(surrogate, adj.shape[0], device=device,
+                                                   train_steps=args.inner_loop_iter, learning_rate=0.1,
+                                                   debug=args.debug)
+    else:
+        attacker = meta_attack.GNNMetaAttack(surrogate, adj.shape[0], device=device,
+                                         train_steps=args.inner_loop_iter, learning_rate=0.1,
+                                         debug=args.debug)
 
     if torch.cuda.is_available():
         attacker.cuda()
