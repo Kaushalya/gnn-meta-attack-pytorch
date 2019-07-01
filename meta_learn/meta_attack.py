@@ -31,11 +31,11 @@ class GNNAttack(nn.Module):
         """
         # Sets the diagonal to zero
         adj_changes_square = self.adj_changes - \
-        torch.diag(torch.diag(self.adj_changes, 0))
+            torch.diag(torch.diag(self.adj_changes, 0))
         # Make it symmetric
         self.adj_changes_square = torch.clamp(
             adj_changes_square + torch.transpose(adj_changes_square, 1, 0), -1, 1)
-        
+
         for iter in range(n_perturbations):
             self.model.train()
             print("perturbation: {} is running".format(iter+1))
@@ -44,7 +44,8 @@ class GNNAttack(nn.Module):
                                    labels, train_ids, val_ids)
             self.model.eval()
             with torch.no_grad():
-                preds = self.model(adj, feature_matrix)
+                preds = self.model(adj, feature_matrix,
+                                   param_dict=self.named_weights)
                 acc_train = utils.accuracy(preds[train_ids], labels[train_ids])
                 acc_val = utils.accuracy(preds[val_ids], labels[val_ids])
                 print("train-accuracy={:.2f}, val-accuracy={:.2f}".
@@ -68,7 +69,7 @@ class GNNAttack(nn.Module):
             self.velocities[i] = self.velocities[i].detach()
 
         meta_grad = self.calculate_meta_grad(adj, adj_norm, adj_modified, feature_matrix,
-         labels, train_ids, val_ids)
+                                             labels, train_ids, val_ids)
         adj_meta_grad = meta_grad * (-2*adj + 1)
         # Make sure the minimum value is 0
         adj_meta_grad -= torch.min(adj_meta_grad)
@@ -84,9 +85,9 @@ class GNNAttack(nn.Module):
         adj[perturb_indices[1], perturb_indices[0]] = adj[perturb_indices]
 
         return adj
-    
-    def calculate_meta_grad(adj, adj_norm, feature_matrix, labels,
-     train_ids, val_ids):
+
+    def calculate_meta_grad(self, adj, adj_norm, feature_matrix, labels,
+                            train_ids, val_ids):
         pass
 
     def filter_singletons(self, adj):
@@ -126,7 +127,7 @@ class GNNMetaAttack(GNNAttack):
                  learning_rate=0.1, momentum=0.9,
                  debug=False, normalize_adj=False):
         super(GNNMetaAttack, self).__init__(model, n_nodes, device, train_steps,
-        learning_rate, momentum, debug, normalize_adj)
+                                            learning_rate, momentum, debug, normalize_adj)
 
     def calculate_meta_grad(self, adj, adj_norm, adj_modified, feature_matrix, labels, train_ids, val_ids):
         for iter in range(self.train_steps):
@@ -150,7 +151,8 @@ class GNNMetaAttack(GNNAttack):
             adj_modified, feature_matrix, param_dict=self.named_weights)
         meta_loss = F.cross_entropy(preds[train_ids], labels[train_ids])
         self.model.zero_grad()
-        meta_grad = torch.autograd.grad(meta_loss, self.adj_changes, retain_graph=True)
+        meta_grad = torch.autograd.grad(
+            meta_loss, self.adj_changes, retain_graph=True)
         meta_loss.detach()
         preds.detach()
         return meta_grad[0]
@@ -160,11 +162,12 @@ class GNNApproxMetaAttack(GNNAttack):
     """
     GNN-Meta-attack with approximated meta-gradients
     """
+
     def __init__(self, model, n_nodes, device=None, train_steps=100,
                  learning_rate=0.1, momentum=0.9,
                  debug=False, normalize_adj=False):
         super(GNNApproxMetaAttack, self).__init__(model, n_nodes, device, train_steps,
-                                            learning_rate, momentum, debug, normalize_adj)
+                                                  learning_rate, momentum, debug, normalize_adj)
 
     def calculate_meta_grad(self, adj, adj_norm, adj_modified, feature_matrix, labels, train_ids, val_ids):
         meta_grad_sum = torch.zeros_like(adj, device=self.device)
@@ -185,9 +188,11 @@ class GNNApproxMetaAttack(GNNAttack):
             self.set_weights(current_params)
             self.model.zero_grad()
             preds_changes = self.model.forward(
-            adj_modified, feature_matrix, param_dict=self.named_weights)
-            meta_loss = F.cross_entropy(preds_changes[train_ids], labels[train_ids])
-            meta_grad_sum += torch.autograd.grad(meta_loss, self.adj_changes, retain_graph=True)[0]
+                adj_modified, feature_matrix, param_dict=self.named_weights)
+            meta_loss = F.cross_entropy(
+                preds_changes[train_ids], labels[train_ids])
+            meta_grad_sum += torch.autograd.grad(
+                meta_loss, self.adj_changes, retain_graph=True)[0]
 
         # reset gradient history
         preds.detach()
